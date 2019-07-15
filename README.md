@@ -1,5 +1,7 @@
 # AMQ Multicluster Reference deployment
 
+## Architecture
+
 The architecture deployed by this template is shown in this diagram:
 
 ![amq-dr-reference-architecture](./media/amq-dr-arch.png)
@@ -8,8 +10,10 @@ In this diagram two sites/data-centers are represented. A GTM directs traffic to
 Messages sent to the brokers are duplicated and sent to the brokers of the other data-center, this ensures that in case of DR messages are not lost.
 
 *Note*: I personally do not understand how those two things (alternative route and message replication) can work together, I'd like the AMQ SMEs to create the configuration and show us.
- 
+
 In this deployment we optimize for availability.
+
+## Installation
 
 Get a [pull secret](https://access.redhat.com/terms-based-registry/#/accounts) for the registry.redhat.con and store ir in a file called `pull-secret.base64`
 
@@ -29,26 +33,36 @@ In order to deploy execute the following steps
     oc label namespace cert-manager certmanager.k8s.io/disable-validation=true
     oc apply --validate=false -f https://github.com/jetstack/cert-manager/releases/download/v0.8.0/cert-manager-openshift.yaml
     ```
+3. Apply the cluster CA template
 
-3. Deploy AMQ and Interconnect in the first datacenter (emulated as a namespace). As Interconnect will need to  connect to "remote" routers, use the name of the remote namespace (even if it doesn't exist):
+    ```shell
+    oc process -f ca-template.yaml | oc apply -n cert-manager -f -
+    ```
+
+4. Deploy AMQ and Interconnect in the first datacenter (emulated as a namespace). As Interconnect will need to  connect to "remote" routers, use the name of the remote namespace (even if it doesn't exist):
 
     ```shell
     oc new-project datacenter-a
-    oc process -f ./template-insecure.yaml -p NAMESPACE=datacenter-a -p DEFAULT_ROUTE_DOMAIN=$DEFAULT_ROUTE_DOMAIN -p PULL_SECRET=$PULL_SECRET REMOTE_NAMESPACE=datacenter-b 
-    	| oc apply -f - -n datacenter-a
+    oc process -f ./template-insecure.yaml -p NAMESPACE=datacenter-a -p DEFAULT_ROUTE_DOMAIN=$DEFAULT_ROUTE_DOMAIN -p PULL_SECRET=$PULL_SECRET REMOTE_NAMESPACE=datacenter-b | oc apply -f - -n datacenter-a
     ```
 
-4. Deploy AMQ and Interconnect in the second datacenter (emulated as a namespace). As Interconnect will need to connect to "remote" routers, use the name of the remote namespace (even if it doesn't exist):
+5. Deploy AMQ and Interconnect in the second datacenter (emulated as a namespace). As Interconnect will need to connect to "remote" routers, use the name of the remote namespace (even if it doesn't exist):
 
     ```shell
     oc new-project datacenter-b
-    oc process -f ./template-insecure.yaml -p NAMESPACE=datacenter-b -p DEFAULT_ROUTE_DOMAIN=$DEFAULT_ROUTE_DOMAIN -p PULL_SECRET=$PULL_SECRET REMOTE_NAMESPACE=datacenter-a
-    	| oc apply -f - -n datacenter-b ```
+    oc process -f ./template-insecure.yaml -p NAMESPACE=datacenter-b -p DEFAULT_ROUTE_DOMAIN=$DEFAULT_ROUTE_DOMAIN -p PULL_SECRET=$PULL_SECRET REMOTE_NAMESPACE=datacenter-a | oc apply -f - -n datacenter-b
+    ```
 
-Upon provisioning both namespaces, there should be an available router topology. For example: 
+## Verification
+
+Once deployed, here are some steps to observe and verify your environment.
+
+### Interconnect
+
+Upon provisioning both namespaces, there should be an available router topology. For example:
 
 ```shell
-$ oc exec amq-interconnect-1-ts7gj -it -- qdstat -c 
+$ oc exec amq-interconnect-1-ts7gj -it -- qdstat -c
 Connections
   id  host                                        container                             role             dir  security                                  authentication  tenant
   ==============================================================================================================================================================================
@@ -60,6 +74,26 @@ Connections
   15  127.0.0.1:57932                             6a6cb5ef-d417-4554-a5c1-f9742e1a064f  normal           in   no-security                               no-auth         
 ```
 
+As represented by this diagram based depiction of the topology available via the Interconnect console:
+![interconnect topology](./media/interconnect-topology.png)
 
-As represented by this diagram based depiction of the topology available via the Interconnect console: 
-![intereconnect topology](./media/interconnect-topology.png) 
+### AMQ Console
+
+To deploy routes to the AMQ consoles:
+
+Apply the broker-console-route template, each replica in the AMQ stateful set, e.g. `0` and `1` and each namespace `datacenter-a` and `datacenter-b`. You will end up with a service and route for each AMQ pod.
+
+For example, create a route and service to access to console for the first AMQ replica in `datacenter-a`:
+
+`oc process -f broker-console-route.yml REPLICA=0 NAMESPACE=datacenter-a -o yaml | oc apply -n datacenter-a -f -`
+
+Find the IP of your cluster's router. You can query an existing route, for example `dig +short <some existing route>`
+
+Add entries to `/etc/hosts` so that the hostnames resolve to your cluster router, for example:
+
+```
+52.45.244.88  broker-amq-0.broker-amq-headless.datacenter-a.svc
+52.45.244.88  broker-amq-1.broker-amq-headless.datacenter-a.svc
+52.45.244.88  broker-amq-0.broker-amq-headless.datacenter-b.svc
+52.45.244.88  broker-amq-1.broker-amq-headless.datacenter-b.svc
+```
