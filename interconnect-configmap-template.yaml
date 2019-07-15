@@ -117,6 +117,20 @@ objects:
          messageLoggingComponents: all #FIXME mcostell this likely does not make sense in most contexts, leaving here to discuss the logging needs with the group  
          idleTimeoutSeconds: 3 #FIXME mcostell the default timeout is 16 seconds which would be far too high for our use case; however, 3 seconds might be too long 
       }
+      
+      connector {
+         name: remote-edge-router
+         role: edge
+         host: amq-interconnect-edge.datacenter-e.svc #FIXME this should be leaving the router
+         port: 55673 #FIXME insecure interrouter port 
+         saslMechanisms: ANONYMOUS
+         cost: 100 #TODO mcostell we plan to multicast messages as a result, we likely want to weight each node on the graph to the same cost, adding this here to check that assumption  
+         maxSessions: 10000 #FIXME mcostell ensure this makes sense. This is the maximum number of inflight sessions that can be made on the connection 
+         linkCapacity: 10000 #FIXME mcostell ensure this makes sense. This is the number of inflight messages that can be in flight per link 
+         messageLoggingComponents: all #FIXME mcostell this likely does not make sense in most contexts, leaving here to discuss the logging needs with the group  
+         idleTimeoutSeconds: 3 #FIXME mcostell the default timeout is 16 seconds which would be far too high for our use case; however, 3 seconds might be too long 
+      }
+      
       #Configure address waypoints for broker interaction
       address{
          prefix: queue
@@ -125,29 +139,74 @@ objects:
       }
       
       autoLink{
+         
          addr: queue.test
          connection: broker-mark-amq-amqp 
-         dir: out
+         direction: out
       }
       
       autoLink{
          addr: queue.test
          connection: broker-mark-amq-amqp 
-         dir: in
+         direction: in
       }
       
+      address{
+         prefix: test
+         distribution: multicast
+         waypoint: yes
+      }
       
-      linkRoute {
-         prefix: topic
+      autoLink{
+         addr: test.test
+         connection: broker-mark-amq-amqp 
+         direction: in 
+      }
+            
+      autoLink{
+         addr: test.test
          connection: broker-mark-amq-amqp
-         dir: out
+         direction: out
+      
       }
       
-      linkRoute {
-         prefix: topic
-         connection: broker-mark-amq-amqp
-         dir: in
+      address{
+         prefix: multicast
+         distribution: multicast
+         waypoint: yes
       }
+      
+      autoLink{
+         addr: multicast.test
+         connection: broker-mark-amq-amqp
+         direction: in
+      }
+      
+      autoLink{
+         addr: multicast.test
+         connection: broker-mark-amq-amqp
+         direction: out
+      }
+      
+      address{
+         prefix: mikec
+         distribution: multicast 
+         waypoint: yes
+      }
+      
+      autoLink{
+         addr: mikec.test
+         connection: broker-mark-amq-amqp
+         direction: in
+      }
+      
+      autoLink{
+         addr: mikec.test
+         connection: broker-mark-amq-amqp
+         direction: out
+      }
+      
+      
 parameters:
 - displayName: Application Name
   description: The name of the application.

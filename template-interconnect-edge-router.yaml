@@ -1,0 +1,290 @@
+apiVersion: template.openshift.io/v1 #v1
+kind: Template
+labels:
+  template: interconnect-edgerouter-template
+message: Apply parameterized interconnect configmap 
+metadata:
+  annotations:
+    description: Template for interconnect edge router.
+    iconClass: icon-amq
+    openshift.io/display-name: interconnect-edgerouter-template
+    openshift.io/provider-display-name: Red Hat, Inc.
+    tags: interconnect
+    template.openshift.io/documentation-url: 'https://access.redhat.com/documentation/en/red-hat-amq/'
+    template.openshift.io/long-description: >-
+      This template allows application of changes to configmaps   
+    template.openshift.io/support-url: 'https://access.redhat.com'    
+    version: 1.8.0
+  name: interconnect-edgerouter-template
+objects:
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: ${INTERCONNECT_APPLICATION_NAME}-edge
+    labels:
+      application: ${INTERCONNECT_APPLICATION_NAME}-edge
+    annotations:
+      description: The router's AMQP port.
+      #service.alpha.openshift.io/serving-cert-secret-name: ${INTERCONNECT_APPLICATION_NAME}-cert
+  spec:
+    ports:
+    - port: 5672
+      name: amqp
+      targetPort: 5672
+    - port: 5671
+      name: amqps
+      targetPort: 5671
+    - port: 8672
+      name: http
+      targetPort: 8672
+    - port: 55672
+      name: inter-router
+      targetPort: 55672
+    - port: 55673
+      name: inter-router-insecure
+      targetPort: 55673
+    selector:
+      deploymentConfig: ${INTERCONNECT_APPLICATION_NAME}-edge
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: "${INTERCONNECT_APPLICATION_NAME}-edge"
+    labels:
+      application: "${INTERCONNECT_APPLICATION_NAME}-edge"
+  spec:
+    strategy:
+      type: Rolling
+      rollingParams:
+        maxSurge: 0
+    triggers:
+    - type: ConfigChange
+    replicas: 1
+    selector:
+      deploymentConfig: "${INTERCONNECT_APPLICATION_NAME}-edge"
+    template:
+      metadata:
+        name: "${INTERCONNECT_APPLICATION_NAME}-edge"
+        labels:
+          deploymentConfig: "${INTERCONNECT_APPLICATION_NAME}-edge"
+          application: "${INTERCONNECT_APPLICATION_NAME}-edge"
+      spec:
+        imagePullSecrets:
+        - name: 5318211-rspazzol-pull-secret
+        serviceAccountName: ${INTERCONNECT_APPLICATION_NAME}-edge
+        terminationGracePeriodSeconds: 60
+        containers:
+        - name: "${INTERCONNECT_APPLICATION_NAME}-edge"
+          ports:
+          - name: amqp
+            containerPort: 5672
+            protocol: TCP
+          - name: amqps
+            containerPort: 5671
+            protocol: TCP
+          - name: http
+            containerPort: 8672
+            protocol: TCP
+          - name: inter
+            containerPort: 55672
+            protocol: TCP
+          - name: inter-insecure
+            containerPort: 55673
+            protocol: TCP
+          env:
+          - name: APPLICATION_NAME
+            value: "${INTERCONNECT_APPLICATION_NAME}-edge"
+          - name: QDROUTERD_CONF
+            value: "/etc/qpid-dispatch/qdrouterd.conf"
+          - name: QDROUTERD_AUTO_MESH_DISCOVERY
+            value: "QUERY"
+          - name: QDROUTERD_AUTO_CREATE_SASLDB_SOURCE
+            value: "/etc/qpid-dispatch-users"
+          - name: QDROUTERD_AUTO_CREATE_SASLDB_PATH
+            value: "/opt/interconnect/etc/qdrouterd.sasldb"
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          image: registry.redhat.io/amq7/amq-interconnect:1.4 #FIXME parameterize this 
+          volumeMounts:
+          #- name: certs
+          #  readOnly: true
+          #  mountPath: /etc/qpid-dispatch-certs/normal/
+          #- name: inter-router-certs
+          #  readOnly: true
+          #  mountPath: /etc/qpid-dispatch-certs/inter-router/
+          #- name: client-ca
+          #  readOnly: true
+          #  mountPath: /etc/qpid-dispatch-certs/client-ca/
+          - name: config-volume
+            mountPath: /etc/qpid-dispatch/
+          #- name: sasl-config
+          #  mountPath: /etc/sasl2/
+          #- name: users
+          #  mountPath: /etc/qpid-dispatch-users
+          terminationGracePeriodSeconds: 60
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8672
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8672
+        volumes:
+        #- name: certs
+        #  secret:
+        #    secretName: ${INTERCONNECT_APPLICATION_NAME}-certs
+        #- name: inter-router-certs
+        #  secret:
+        #    secretName: ${INTERCONNECT_APPLICATION_NAME}-certs
+        #- name: client-ca
+        #  secret:
+        #    secretName: ${INTERCONNECT_APPLICATION_NAME}-certs
+        #- name: sasl-config
+        #  configMap:
+        #    name: ${INTERCONNECT_APPLICATION_NAME}-sasl-config
+        #- name: users
+        #  secret:
+        #    secretName: ${INTERCONNECT_APPLICATION_NAME}-users
+        - name: config-volume
+          configMap:
+            name: ${INTERCONNECT_APPLICATION_NAME}-edge
+        imagePullPolicy: Always
+- kind: ServiceAccount
+  apiVersion: v1
+  metadata:
+    name: ${INTERCONNECT_APPLICATION_NAME}-edge
+    labels:
+      application: "${INTERCONNECT_APPLICATION_NAME}-edge"
+- kind: RoleBinding
+  apiVersion: v1
+  metadata:
+    name: ${INTERCONNECT_APPLICATION_NAME}-edge
+    labels:
+      application: "${INTERCONNECT_APPLICATION_NAME}-edge"
+  subjects:
+  - kind: ServiceAccount
+    name: ${INTERCONNECT_APPLICATION_NAME}-edge
+  roleRef:
+    name: "view"
+- kind: ConfigMap
+  apiVersion: v1
+  metadata:
+    name: ${INTERCONNECT_APPLICATION_NAME}-edge
+    labels:
+      application: ${INTERCONNECT_APPLICATION_NAME}-edge
+  data:
+    qdrouterd.conf: |-
+      router {
+          mode: edge
+          id: Router.edge.${HOSTNAME}
+      }
+
+      #Insecure AMQP connection
+      listener {
+          host: 0.0.0.0
+          port: amqp
+          authenticatePeer: no
+          saslMechanisms: ANONYMOUS
+      }
+      
+      listener {
+          host: 0.0.0.0
+          port: 8672
+          authenticatePeer: no
+          saslMechanisms: ANONYMOUS
+          http: true
+          httpRootDir: /usr/share/qpid-dispatch/console
+      }
+      
+      #Edge Listener 
+      #listener {
+      #   host: 0.0.0.0
+      #   port: 55673
+      #   role: edge
+      #   authenticatePeer: no
+      #   saslMechanisms: ANONYMOUS
+         
+      #}
+      
+      #Broker Connector 
+      #connector {
+      #    name: broker-mark-amq-amqp
+      #    role: route-container
+      #    host: ${AMQ_NAME}-amq-headless.${REMOTE_NAMESPACE}.svc
+          #port: amqps
+      #    port: amqp
+          #sslProfile: service_tls
+      #    saslMechanisms: ANONYMOUS
+      #}  
+      #inter-router connection for remote cluster interconnects 
+      connector {
+         name: remote-interior-router
+         role: edge
+         host: ${INTERCONNECT_APPLICATION_NAME}.${REMOTE_NAMESPACE}.svc #FIXME this should be leaving the router
+         port: 55673 #FIXME insecure interrouter port 
+         saslMechanisms: ANONYMOUS
+         #cost: 100 #TODO mcostell we plan to multicast messages as a result, we likely want to weight each node on the graph to the same cost, adding this here to check that assumption  
+         maxSessions: 10000 #FIXME mcostell ensure this makes sense. This is the maximum number of inflight sessions that can be made on the connection 
+         linkCapacity: 10000 #FIXME mcostell ensure this makes sense. This is the number of inflight messages that can be in flight per link 
+         messageLoggingComponents: all #FIXME mcostell this likely does not make sense in most contexts, leaving here to discuss the logging needs with the group  
+         idleTimeoutSeconds: 3 #FIXME mcostell the default timeout is 16 seconds which would be far too high for our use case; however, 3 seconds might be too long 
+      }
+      
+      address{
+         prefix: mikec
+         waypoint: yes
+      }
+     
+#SECRETS 
+- kind: Secret
+  apiVersion: v1
+  metadata:
+    name: ${INTERCONNECT_APPLICATION_NAME}-edge-users
+    labels:
+      application: ${INTERCONNECT_APPLICATION_NAME}
+  stringData:
+    ${IC_USERNAME}: ${IC_PASSWORD}
+- kind: ConfigMap
+  apiVersion: v1
+  metadata:
+    name: ${INTERCONNECT_APPLICATION_NAME}-sasl-config
+    labels:
+      application: ${INTERCONNECT_APPLICATION_NAME}
+  data:
+    qdrouterd.conf: |-
+      pwcheck_method: auxprop
+      auxprop_plugin: sasldb
+      sasldb_path: /opt/interconnect/etc/qdrouterd.sasldb
+      mech_list: SCRAM-SHA-1 DIGEST-MD5 PLAIN EXTERNAL ANONYMOUS     
+        
+parameters:
+- displayName: Application Name
+  description: The name of the application.
+  name: INTERCONNECT_APPLICATION_NAME
+  value: amq-interconnect
+  required: true
+- description: REMOTE_NAMESPACE is the namespace of the remote router #FIXME this is a bad hack 
+  name: REMOTE_NAMESPACE
+  required: true
+- description: The name of the broker
+  displayName: AMQ Name
+  name: AMQ_NAME
+  value: broker
+- description: Namespace
+  displayName: Namespace in which the app is being deployed
+  name: NAMESPACE
+  required: true
+- description: Create a user name for accessing the router's web console.
+  name: IC_USERNAME
+  value: admin
+- description: Create a password for accessing the router's web console.
+  from: '[A-Z0-9]{8}'
+  #generate: expression
+  value: admin
+  name: IC_PASSWORD  

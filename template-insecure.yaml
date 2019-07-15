@@ -575,7 +575,7 @@ objects:
             valueFrom:
               fieldRef:
                 fieldPath: status.podIP
-          image: registry.redhat.io/amq7/amq-interconnect:1.4 #FIXME parameterize this 
+          #image: registry.redhat.io/amq7/amq-interconnect:1.4 #FIXME parameterize this 
           volumeMounts:
           - name: certs
             readOnly: true
@@ -721,8 +721,9 @@ objects:
           name: broker-mark-amq-amqp
           role: route-container
           host: ${AMQ_NAME}-amq-headless.${NAMESPACE}.svc
-          port: amqps
-          sslProfile: service_tls
+          #port: amqps
+          port: amqp
+          #sslProfile: service_tls
           saslMechanisms: ANONYMOUS
       }  
       #inter-router connection for remote cluster interconnects 

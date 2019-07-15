@@ -1,0 +1,46 @@
+apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: cluster-certificate-issuer-service-account
+    labels:
+      app: ${AMQ_APPLICATION_NAME}
+- apiVersion: rbac.authorization.k8s.io/v1beta1
+  kind: Role
+  metadata:
+    name: ${AMQ_APPLICATION_NAME}-role
+    labels:
+      app: ${AMQ_APPLICATION_NAME}
+  rules:
+  - apiGroups:
+    - ""
+    resources:
+    - endpoints
+    verbs:
+    - create
+    - delete
+    - deletecollection
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - namespaces
+    verbs:
+    - get
+    - list
+- apiVersion: rbac.authorization.k8s.io/v1beta1
+  kind: RoleBinding
+  metadata:
+    name: ${AMQ_APPLICATION_NAME}-role-binding
+    labels:
+      app: ${AMQ_APPLICATION_NAME}
+  subjects:
+    - kind: ServiceAccount
+      name: ${AMQ_APPLICATION_NAME}-service-account
+  roleRef:
+    kind: Role
+    name: ${AMQ_APPLICATION_NAME}-role
+    apiGroup: rbac.authorization.k8s.io
